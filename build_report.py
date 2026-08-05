@@ -339,10 +339,22 @@ TEMPLATE = r"""<!doctype html><html><head><meta charset="utf-8">
  figure.map canvas{width:100%;height:auto;border-radius:6px;background:#0b0c0f;display:block}
  figure.map figcaption{font-size:12.5px;color:#9aa1ab;margin-top:8px;line-height:1.5}
  .method p{color:#9aa1ab;font-size:13px}
+ .disclaimer{max-width:1060px;margin:16px auto 0;padding:12px 16px;
+   background:#2a1f14;border:1px solid #6b4a1f;border-radius:8px;
+   color:#e8c9a0;font-size:13px;line-height:1.55}
+ .disclaimer b{color:#ffd27a}
  #tip{position:fixed;display:none;background:#0e1014ee;border:1px solid #3a3d44;border-radius:6px;
    padding:6px 9px;font-size:12px;pointer-events:none;z-index:9}
  #tip b{color:#ffd27a}
 </style></head><body>
+<div class=disclaimer><b>⚠ Machine-generated analysis — expect errors.</b>
+This report was written by Claude (an AI) from data extracted out of the game's
+save files. The extraction itself is validated against the game's own recorded
+numbers, but the <i>interpretation</i> — what mattered, what caused what, what
+either player should have done — is a machine's reading of a spreadsheet, not a
+strong player's judgement. Causal claims are inference, some derived numbers are
+approximations (noted in Method), and outright mistakes are likely. Treat it as a
+prompt for your own analysis, not a verdict.</div>
 __BODY__
 <div id=tip></div>
 <script>const ICON_DATA=__ICONS__;</script>
