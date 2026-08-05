@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+saves/
+reports/
+analysis/
+viewer/data.js
+viewer/icons/
+.DS_Store

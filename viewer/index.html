@@ -1,0 +1,448 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>OW Replay — dual POV</title>
+<style>
+ html,body{margin:0;background:#0b0c0f;color:#dfe2e6;font:13px system-ui}
+ #top{position:sticky;top:0;z-index:9;background:#15171c;border-bottom:1px solid #2a2d34;
+   padding:8px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+ #top b{color:#ffd27a}
+ #turnlab{font-size:16px;font-weight:700;color:#ffd27a;min-width:70px}
+ input[type=range]{width:320px}
+ button{background:#1b1e24;color:#cfd3da;border:1px solid #3a3d44;border-radius:5px;
+   padding:4px 10px;cursor:pointer;font:13px system-ui}
+ button:hover{border-color:#ffd27a}
+ label.ck{display:flex;gap:5px;align-items:center;cursor:pointer;color:#9aa1ab}
+ #panes{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px}
+ .pane{min-width:0}
+ .pane h2{margin:2px 0 4px;font-size:15px}
+ .pane h2 .pov{color:#9aa1ab;font-weight:400;font-size:12px}
+ .maphold{position:relative;height:52vh;overflow:hidden;background:#0b0c0f;
+   border:1px solid #2a2d34;border-radius:8px;cursor:zoom-in}
+ .maphold canvas{position:absolute;left:0;top:0;transform-origin:0 0}
+ /* single-POV layout: big map left, report right, no scrolling */
+ #panes.single{grid-template-columns:1fr}
+ #panes.single .pane{display:grid;grid-template-columns:minmax(0,1fr) 400px;
+   gap:10px;align-items:start}
+ #panes.single .pane h2{grid-column:1/-1;margin-bottom:0}
+ #panes.single .maphold{height:calc(100vh - 110px)}
+ #panes.single .side{margin-top:0;max-height:calc(100vh - 110px)}
+ #panes.single .pane.hidden{display:none}
+ .segbtn{display:flex;gap:0}
+ .segbtn button{border-radius:0;border-left-width:0}
+ .segbtn button:first-child{border-radius:5px 0 0 5px;border-left-width:1px}
+ .segbtn button:last-child{border-radius:0 5px 5px 0}
+ .segbtn button.on{background:#ffd27a;color:#1a1206;border-color:#ffd27a;font-weight:600}
+ #lightbox{position:fixed;inset:0;z-index:50;background:#000d;display:none;
+   overflow:hidden;cursor:grab}
+ #lightbox.open{display:block}
+ #lightbox.drag{cursor:grabbing}
+ #lightbox canvas{position:absolute;left:0;top:0;transform-origin:0 0}
+ #lbclose{position:fixed;top:12px;right:16px;z-index:60;font-size:22px}
+ #lblabel{position:fixed;top:14px;left:16px;z-index:60;color:#ffd27a;font-weight:700;font-size:15px}
+ .side{margin-top:6px;background:#101216;border:1px solid #2a2d34;border-radius:8px;
+   padding:8px 10px;max-height:38vh;overflow:auto;line-height:1.5}
+ .side h3{margin:.6em 0 .2em;font-size:12px;color:#ffd27a;text-transform:uppercase;letter-spacing:.5px}
+ .side h3:first-child{margin-top:0}
+ .side ul{margin:.1em 0 .3em;padding-left:16px}
+ .side li{margin:0}
+ .muted{color:#9aa1ab}
+ .warn{color:#e8b45a}
+ .kill{color:#e06c5b}
+ .p0{color:#e8b45a}.p1{color:#7fb0d8}
+ #tip{position:fixed;pointer-events:none;display:none;z-index:20;background:#0e1014ee;
+   border:1px solid #3a3d44;border-radius:6px;padding:6px 8px;font-size:12px;max-width:280px}
+ #tip b{color:#ffd27a}
+</style></head><body>
+<div id=top>
+ <b id=gname></b>
+ <button id=prev>◀</button>
+ <span id=turnlab></span>
+ <button id=next>▶</button>
+ <input type=range id=slider min=0 max=0 value=0>
+ <span class=segbtn id=viewseg></span>
+ <label class=ck><input type=checkbox id=omni> omniscient</label>
+ <label class=ck><input type=checkbox id=visfog checked> vision fog</label>
+ <span class=muted>click a map to zoom · ←/→ keys · bright = currently visible, dim = explored, dark = unexplored (vision is geometric approx.)</span>
+</div>
+<div id=panes></div>
+<div id=lightbox><span id=lblabel></span><button id=lbclose>✕ close</button></div>
+<div id=tip></div>
+<script src="data.js"></script>
+<script>
+const D=DATA, W=D.w, H=D.h, TURNS=D.turns;
+const PCOL={0:[232,180,90],1:[110,160,210],'-1':[150,60,60]};
+const TERR={WATER:[38,71,110],TEMPERATE:[104,138,74],LUSH:[74,110,56],
+ ARID:[170,148,95],SAND:[206,184,120],MARSH:[96,110,80],
+ TUNDRA:[200,205,210],URBAN:[150,128,116]};
+const S=13,HW=Math.sqrt(3)*S,VS=1.5*S,PAD=4;
+const CW=Math.ceil(W*HW+HW/2+2*PAD), CH=Math.ceil((H-1)*VS+2*S+2*PAD);
+function cen(x,y){return [x*HW+(y%2===0?HW/2:0)+HW/2+PAD,(H-1-y)*VS+S+PAD];}
+const DXe=[0,1,1,1,0,-1],DXo=[-1,0,1,0,-1,-1],DY=[1,1,0,-1,-1,0];
+function nbIdx(x,y){const o=[];for(let q=0;q<6;q++){
+ const nx=x+(y%2===0?DXe:DXo)[q],ny=y+DY[q];
+ if(nx>=0&&ny>=0&&nx<W&&ny<H)o.push([nx,ny,ny*W+nx]);}return o;}
+function lum(c){return .299*c[0]+.587*c[1]+.114*c[2];}
+function fmt10(v){return v==null?'?':(v/10).toFixed(1).replace(/\.0$/,'');}
+const icons={};
+function icon(n){if(!(n in icons)){const im=new Image();im.onload=()=>drawAll();
+ im.onerror=()=>{icons[n]=null};
+ im.src=(typeof ICON_DATA!=='undefined'&&ICON_DATA[n])?ICON_DATA[n]:'icons/'+n+'.png';
+ icons[n]=im;}return icons[n];}
+
+// current turn index + omniscient / vision-fog flags
+let ti=TURNS.length-1, omni=false, visfog=true;
+
+// hex distance (even-r offset → cube)
+function hexd(a,b){const cube=i=>{const col=i%W,row=(i/W)|0,
+  x=col-((row+(row&1))>>1);return [x,-x-row,row];};
+ const A=cube(a),B=cube(b);
+ return (Math.abs(A[0]-B[0])+Math.abs(A[1]-B[1])+Math.abs(A[2]-B[2]))>>1;}
+
+function makeMap(pov){
+ const pane=document.createElement('div');pane.className='pane';
+ const pl=D.players[pov];
+ pane.innerHTML=`<h2><span class=p${pov}>${pl.name}</span> <span class=pov>(${pl.nation}) — their fog of war</span></h2>
+  <div class=maphold><canvas></canvas></div><div class=side></div>`;
+ document.getElementById('panes').append(pane);
+ const hold=pane.querySelector('.maphold'), cv=pane.querySelector('canvas'),
+  side=pane.querySelector('.side'), ctx=cv.getContext('2d');
+ const SS=Math.min(3,(window.devicePixelRatio||1)*2);
+ cv.width=CW*SS;cv.height=CH*SS;cv.style.width=CW+'px';cv.style.height=CH+'px';
+
+ function hexp(cx,cy,r){ctx.beginPath();
+  for(let i=0;i<6;i++){const a=Math.PI/180*(60*i-90),
+   px=cx+r*Math.cos(a),py=cy+r*Math.sin(a);i?ctx.lineTo(px,py):ctx.moveTo(px,py);}
+  ctx.closePath();}
+
+ function fogged(i,T){if(omni)return false;const r=D.rev[pov][i];return r<0||r>T;}
+
+ function draw(){
+  const TD=TURNS[ti], T=TD.t;
+  ctx.setTransform(SS,0,0,SS,0,0);
+  ctx.fillStyle='#0b0c0f';ctx.fillRect(0,0,CW,CH);
+  const tiles=TD.tiles;
+  // current vision set for this pov (from export: unit radii + city
+  // territory ring + save flags)
+  const visSet=new Set((TD.vis&&TD.vis[pov])||[]);
+  const seen=x=>visSet.has(x);
+  const dimmed=i=>visfog&&!omni&&!visSet.has(i);   // explored but dark
+  // terrain
+  for(let i=0;i<W*H;i++){
+   const x=i%W,y=(i/W)|0;
+   const tn=D.L.terr[D.terr[i]]||'',h=D.L.hgt[D.hgt[i]]||'',vg=D.L.veg[D.veg[i]]||'';
+   let c,water=false;
+   if(tn==='WATER'||h.indexOf('LAKE')>=0){water=true;
+    c=h.indexOf('LAKE')>=0?[40,118,124]:[26,52,92];}
+   else c=(TERR[tn]||[90,90,90]).slice();
+   const fog=fogged(i,T);
+   if(fog){const g=lum(c)*0.32;c=[g,g,g];}
+   else if(h.indexOf('MOUNTAIN')>=0||h.indexOf('VOLCANO')>=0){
+    const b=lum(c)*0.6+26;c=[b,b,b+3];}
+   if(!fog&&dimmed(i)){ // explored, not currently seen: desaturate + darken
+    const g=lum(c);c=[(c[0]+g)*0.33,(c[1]+g)*0.33,(c[2]+g)*0.33];}
+   const ce=cen(x,y);
+   ctx.fillStyle=`rgb(${c[0]|0},${c[1]|0},${c[2]|0})`;
+   hexp(ce[0],ce[1],S);ctx.fill();
+   if(fog||water)continue;
+   if(h.indexOf('HILL')>=0){ctx.save();hexp(ce[0],ce[1],S);ctx.clip();
+    ctx.fillStyle='rgba(255,255,255,.16)';ctx.fillRect(ce[0]-S,ce[1]-S,2*S,S*.85);
+    ctx.fillStyle='rgba(0,0,0,.30)';ctx.fillRect(ce[0]-S,ce[1]+S*.05,2*S,S);ctx.restore();}
+   const jg=vg.indexOf('JUNGLE')>=0,fr=vg.indexOf('TREE')>=0||vg.indexOf('FOREST')>=0;
+   if(jg&&vg.indexOf('CUT')<0){ctx.save();hexp(ce[0],ce[1],S);ctx.clip();
+    ctx.fillStyle='rgba(6,44,10,.5)';ctx.fillRect(ce[0]-S,ce[1]-S,2*S,2*S);ctx.restore();}
+   if(jg||fr){const nt=jg?3:2,tw=S*.26,th=S*.62,
+     gc=jg?'rgba(14,50,16,.95)':'rgba(24,68,26,.95)',
+     yb=ce[1]+(h.indexOf('HILL')>=0?-S*.12:S*.24);
+    for(let k=0;k<nt;k++){const X=ce[0]+(k-(nt-1)/2)*(tw*1.25);
+     ctx.fillStyle='rgba(60,40,20,.9)';ctx.fillRect(X-tw*.16,yb-th*.18,tw*.32,th*.34);
+     ctx.fillStyle=gc;ctx.beginPath();ctx.moveTo(X,yb-th);
+     ctx.lineTo(X-tw,yb);ctx.lineTo(X+tw,yb);ctx.closePath();ctx.fill();}}
+  }
+  // rivers (edge W/SW/SE bits), skip fogged
+  ctx.strokeStyle='#4696eb';ctx.lineWidth=Math.max(2,S/4);
+  const RB={1:5,2:4,4:3};
+  for(let i=0;i<W*H;i++){if(!D.riv[i]||fogged(i,TD.t))continue;
+   const x=i%W,y=(i/W)|0,ce=cen(x,y);
+   for(const bit in RB){if(!(D.riv[i]&bit))continue;
+    const di=RB[bit],ox=(y%2===0?DXe:DXo)[di],nx=x+ox,ny=y+DY[di];
+    if(nx<0||ny<0||nx>=W||ny>=H)continue;
+    const nc=cen(nx,ny),mx=(ce[0]+nc[0])/2,my=(ce[1]+nc[1])/2,
+     dx=nc[0]-ce[0],dy=nc[1]-ce[1],L=Math.hypot(dx,dy)||1,hh=S/Math.sqrt(3)*.96;
+    ctx.beginPath();ctx.moveTo(mx-(-dy/L)*hh,my-(dx/L)*hh);
+    ctx.lineTo(mx+(-dy/L)*hh,my+(dx/L)*hh);ctx.stroke();}}
+  // territory wash + borders
+  for(const[id,e]of Object.entries(tiles)){const i=+id;
+   if(e.o==null||fogged(i,T))continue;
+   const ce=cen(i%W,(i/W)|0),c=PCOL[e.o]||[120,120,120];
+   ctx.fillStyle=`rgba(${c[0]},${c[1]},${c[2]},.16)`;
+   hexp(ce[0],ce[1],S);ctx.fill();
+   // hairline border where neighbour has different owner
+   ctx.strokeStyle=`rgba(${c[0]},${c[1]},${c[2]},.8)`;ctx.lineWidth=1.2;
+   for(const[nx,ny,nid]of nbIdx(i%W,(i/W)|0)){
+    const ne=tiles[nid];if(ne&&ne.o===e.o)continue;
+    const b=cen(nx,ny),mx=(ce[0]+b[0])/2,my=(ce[1]+b[1])/2,
+     dx=b[0]-ce[0],dy=b[1]-ce[1],L=Math.hypot(dx,dy)||1,hh=S/Math.sqrt(3);
+    ctx.beginPath();ctx.moveTo(mx-(-dy/L)*hh,my-(dx/L)*hh);
+    ctx.lineTo(mx+(-dy/L)*hh,my+(dx/L)*hh);ctx.stroke();}}
+  // roads
+  ctx.strokeStyle='rgba(160,120,70,.9)';ctx.lineWidth=Math.max(1.5,S/6);
+  for(const[id,e]of Object.entries(tiles)){const i=+id;
+   if(!e.r||fogged(i,T))continue;
+   const x=i%W,y=(i/W)|0,ce=cen(x,y);
+   for(const[nx,ny,nid]of nbIdx(x,y)){const ne=tiles[nid];
+    if(!ne||!ne.r||nid<i)continue;
+    const b=cen(nx,ny);ctx.beginPath();ctx.moveTo(ce[0],ce[1]);
+    ctx.lineTo((ce[0]+b[0])/2,(ce[1]+b[1])/2);ctx.stroke();}}
+  // improvements + resources
+  for(const[id,e]of Object.entries(tiles)){const i=+id;
+   if(fogged(i,T))continue;
+   const ce=cen(i%W,(i/W)|0);
+   if(e.i){const im=icon(e.i);
+    if(im&&im.complete&&im.naturalWidth){
+     ctx.globalAlpha=e.b?0.45:1;
+     ctx.drawImage(im,ce[0]-S*.55,ce[1]-S*.55,S*1.1,S*1.1);
+     ctx.globalAlpha=1;
+     if(e.b){ctx.fillStyle='#ffd27a';ctx.font=`bold ${S*.55}px system-ui`;
+      ctx.textAlign='center';ctx.fillText(e.b,ce[0]+S*.45,ce[1]+S*.5);}}}
+   if(e.s){ // city site: pink = free, red ring + label = tribe-held camp
+    const tribal=e.s!=='Free';
+    ctx.fillStyle=tribal?'#c23b2e':'#ff2daa';
+    ctx.beginPath();ctx.arc(ce[0],ce[1],S*.32,0,7);ctx.fill();
+    ctx.strokeStyle='#0b0c0f';ctx.lineWidth=1;ctx.stroke();
+    if(tribal){ctx.font=`bold ${S*.5}px system-ui`;ctx.textAlign='center';
+     ctx.lineWidth=2.5;ctx.strokeStyle='#0b0c0fcc';
+     ctx.strokeText(e.s,ce[0],ce[1]+S*.95);
+     ctx.fillStyle='#ff9a8a';ctx.fillText(e.s,ce[0],ce[1]+S*.95);}}
+  }
+  for(let i=0;i<W*H;i++){if(!D.res[i]||fogged(i,T))continue;
+   const im=icon(D.res[i]);if(im&&im.complete&&im.naturalWidth){
+    const ce=cen(i%W,(i/W)|0);
+    ctx.drawImage(im,ce[0]+S*.12,ce[1]-S*.82,S*.62,S*.62);}}
+  // attack flashes (both players' attacks this turn, visible tiles)
+  for(const pid in TD.attacks)for(const a of TD.attacks[pid]){
+   if(fogged(a.x,T))continue;
+   const ce=cen(a.x%W,(a.x/W)|0);
+   ctx.strokeStyle=a.k?'#ff5040':'#ffb020';ctx.lineWidth=2;
+   hexp(ce[0],ce[1],S*.92);ctx.stroke();
+   ctx.fillStyle=a.k?'#ff5040':'#ffb020';ctx.font=`${S*.9}px system-ui`;
+   ctx.textAlign='center';ctx.fillText(a.k?'☠':'⚔',ce[0],ce[1]-S*.55);}
+  // units (enemy/tribal units require current vision when fog is on)
+  for(const u of TD.units){
+   if(fogged(u.x,T))continue;
+   if(visfog&&!omni&&u.p!=pov&&!seen(u.x))continue;
+   const ce=cen(u.x%W,(u.x/W)|0),c=PCOL[u.p]||PCOL['-1'];
+   ctx.fillStyle=`rgb(${c[0]},${c[1]},${c[2]})`;
+   ctx.beginPath();ctx.arc(ce[0],ce[1]+S*.24,S*.52,0,7);ctx.fill();
+   ctx.strokeStyle='#0b0c0f';ctx.lineWidth=1.2;ctx.stroke();
+   const im=icon(u.t);
+   if(im&&im.complete&&im.naturalWidth)
+    ctx.drawImage(im,ce[0]-S*.4,ce[1]-S*.16,S*.8,S*.8);
+   if(u.hp<u.mhp){const w=S*.9,frac=u.hp/u.mhp;
+    ctx.fillStyle='#333';ctx.fillRect(ce[0]-w/2,ce[1]+S*.84,w,2.8);
+    ctx.fillStyle=frac>.5?'#7fb069':frac>.25?'#e8b45a':'#e06c5b';
+    ctx.fillRect(ce[0]-w/2,ce[1]+S*.84,w*frac,2.8);}}
+  // cities: crest + label (enemy production hidden under POV fog)
+  for(const c of TD.cities){
+   if(fogged(c.x,T))continue;
+   const ce=cen(c.x%W,(c.x/W)|0),pc=PCOL[c.p];
+   const im=icon('crest_'+c.crest);
+   ctx.fillStyle=`rgb(${pc[0]},${pc[1]},${pc[2]})`;
+   ctx.beginPath();ctx.arc(ce[0],ce[1]-S*.28,S*.5,0,7);ctx.fill();
+   ctx.strokeStyle='#0b0c0f';ctx.lineWidth=1.2;ctx.stroke();
+   if(im&&im.complete&&im.naturalWidth)
+    ctx.drawImage(im,ce[0]-S*.34,ce[1]-S*.62,S*.68,S*.68);
+   ctx.font=`bold ${S*.62}px system-ui`;ctx.textAlign='center';
+   ctx.lineWidth=3;ctx.strokeStyle='#0b0c0fcc';
+   const own=omni||c.p==pov;
+   const lbl=c.n+(own&&c.prod?` · ${c.prod}`:'');
+   ctx.strokeText(lbl,ce[0],ce[1]+S*1.35);
+   ctx.fillStyle='#fff';ctx.fillText(lbl,ce[0],ce[1]+S*1.35);}
+  // landmarks: ★ gold = undiscovered by anyone; ★ white = discovered by
+  // someone but not this player; name label once this player has it.
+  for(const lm of (D.landmarks||[])){
+   const r0=lm.rev['0'],r1=lm.rev['1'],rp=lm.rev[String(pov)];
+   const anyDisc=(r0>=0&&r0<=T)||(r1>=0&&r1<=T);
+   const povDisc=rp>=0&&rp<=T;
+   const ce=cen(lm.x%W,(lm.x/W)|0);
+   if(!anyDisc||!povDisc){
+    ctx.font=`${S*1.1}px system-ui`;ctx.textAlign='center';
+    ctx.lineWidth=3;ctx.strokeStyle='#0b0c0fcc';
+    ctx.strokeText('★',ce[0],ce[1]+S*.35);
+    ctx.fillStyle=anyDisc?'#ffffff':'#ffd84a';
+    ctx.fillText('★',ce[0],ce[1]+S*.35);}
+   if(povDisc&&!fogged(lm.x,T)){
+    ctx.font=`italic ${S*.55}px system-ui`;ctx.textAlign='center';
+    ctx.lineWidth=2.5;ctx.strokeStyle='#0b0c0fbb';
+    ctx.strokeText(lm.n,ce[0],ce[1]-S*.7);
+    ctx.fillStyle='#e8dcb0';ctx.fillText(lm.n,ce[0],ce[1]-S*.7);}}
+ }
+
+ function sidebar(){
+  const TD=TURNS[ti];
+  const h=(TD.report.halves||[]).find(x=>x.player==pov);
+  if(!h){side.innerHTML='<span class=muted>no data for this half-turn</span>';return;}
+  let s='';
+  const t=h.tech;
+  s+='<h3>Tech</h3>';
+  if(t.discovered_this_turn&&t.discovered_this_turn.length)
+   s+=`<div class=warn>⚡ discovered ${t.discovered_this_turn.join(', ')}</div>`;
+  s+=t.researching
+   ?`<div>${t.researching_name} (${t.years_left||'?'}y; ${fmt10(t.progress10)}/${fmt10(t.cost10)})</div>`
+   :'<div class=muted>choosing…</div>';
+  if(t.alternatives.length)
+   s+=`<div class=muted>alts: ${t.alternatives.map(a=>a.name+(a.bonus_card?' (bonus)':'')).join(', ')}</div>`;
+  const sci=h.science;
+  s+=`<h3>Science +${fmt10(sci.rate10)}/y</h3><ul>`;
+  (sci.breakdown||[]).forEach(([l,v])=>{s+=`<li class=${l=='unattributed'?'muted':''}>${l}: ${v>=0?'+':''}${fmt10(v)}</li>`});
+  s+='</ul>';
+  const laws=h.laws,SUCC=new Set(['LAWCLASS_ORDER','LAWCLASS_SUCCESSION']);
+  const civic=laws.current.filter(l=>!SUCC.has(l.law_class)),
+   succ=laws.current.filter(l=>SUCC.has(l.law_class));
+  s+=`<h3>Laws</h3><div>${civic.map(l=>l.name).join(', ')||'<span class=muted>none</span>'}`
+   +(laws.adopted_this_turn.length?` <span class=warn>⚡ ${laws.adopted_this_turn.join(', ')}</span>`:'')+'</div>';
+  if(succ.length)s+=`<div class=muted>succession: ${succ.map(l=>l.name).join(', ')}</div>`;
+  const st=h.stats||{};
+  if(st.milscore!=null||st.gdp!=null){
+   s+=`<h3>Stats</h3><div>milscore ${st.milscore??'?'} · sci total ${fmt10(st.sci_total10)} · GDP ${st.gdp??'?'}/y</div>`;
+   if(st.gdp_components&&st.gdp_components.length){s+='<ul>';
+    st.gdp_components.forEach(c=>{const yn=c['yield'].replace('YIELD_','').toLowerCase();
+     if(c.price==null){s+=`<li>${yn}: ${c.amount>=0?'+':''}${c.amount}/y</li>`;return;}
+     const srcs=(c.sources||[]).slice(0,6).map(x=>`+${x.amount} ${x.name}`).join(', ')
+      +(c.other?`${(c.sources||[]).length?', ':''}${c.other>0?'+':''}${c.other} other`:'');
+     s+=`<li>${yn}: ${c.amount>=0?'+':''}${c.amount}/y @ ${c.price}g = ${c.value}g`
+      +(srcs?` <span class=muted>(${srcs})</span>`:'')+'</li>';});
+    s+='</ul>';}}
+  if(h.improvement_counts&&Object.keys(h.improvement_counts).length)
+   s+=`<h3>Improvements</h3><div class=muted>${Object.entries(h.improvement_counts)
+    .map(([n,k])=>k>1?`${n} ×${k}`:n).join(', ')}</div>`;
+  const lg=h.legitimacy;
+  if(lg&&lg.value!=null)
+   s+=`<h3>Legitimacy ${lg.value}${lg.delta?` <span class=warn>(${lg.delta>0?'+':''}${lg.delta})</span>`:''}</h3>`;
+  if(h.events&&h.events.length){s+='<h3>Events</h3><ul>';
+   h.events.forEach(ev=>{s+=`<li>${ev.title}`
+    +(ev.option_text?` <span class=muted>→ “${ev.option_text}”</span>`:'')+'</li>';});
+   s+='</ul>';}
+  const rel=h.religion;
+  if(rel.state_religion||rel.founded_this_turn.length||rel.new_theologies.length){
+   s+='<h3>Religion</h3>';
+   if(rel.state_religion)s+=`<div>state: ${rel.state_religion}${rel.state_religion_adopted?' <span class=warn>⚡</span>':''}</div>`;
+   rel.founded_this_turn.forEach(f=>s+=`<div class=warn>⚡ ${f}</div>`);
+   rel.new_theologies.forEach(nt=>s+=`<div class=warn>⚡ ${nt.religion}: ${nt.theology}</div>`);}
+  s+='<h3>Cities</h3><ul>';
+  h.cities.forEach(c=>{const p=c.producing,cs=c.science||{};
+   let sci='';
+   if(cs.total10!=null){sci=` · 🧪${fmt10(cs.total10)}`;
+    if(cs.delta10)sci+=` <span class=${cs.delta10>0?'warn':'kill'}>(${cs.delta10>0?'+':''}${fmt10(cs.delta10)})</span>`;}
+   s+=`<li><b>${c.name}</b> (pop ${c.citizens+c.specialists}) — `
+    +(p?`${p.name} (${p.years_left||'?'}y, ${fmt10(p.progress10)}/${fmt10(p.cost10)})`:'<span class=muted>idle</span>')
+    +(c.growth_delta10?` <span class=muted>${c.growth_delta10>0?'+':''}${fmt10(c.growth_delta10)}g/y</span>`:'')
+    +sci
+    +(cs.changes&&cs.changes.length?`<div class=muted style="margin-left:12px">${cs.changes.join('; ')}</div>`:'')
+    +'</li>';});
+  s+='</ul>';
+  if(h.workers.length){s+='<h3>Workers</h3><ul>';
+   h.workers.forEach(w=>{s+=`<li>${w.label}${w.city?' in '+w.city:''}: `
+    +(w.building?`${w.building} (${w.years_left}y)`:'<span class=muted>idle/moving</span>')+'</li>';});
+   s+='</ul>';}
+  if(h.attacks.length){s+='<h3>Attacks made</h3><ul>';
+   h.attacks.forEach(a=>{const tg=a.target;
+    s+=`<li>@(${a.tile_xy}) ×${a.attacks}: `+(tg?`${tg.name} (${tg.owner}) ${tg.killed?'<span class=kill>KILLED</span>':(tg.damage_dealt?'-'+tg.damage_dealt+'hp':'')}`:'tile')
+     +` <span class=muted>by ${a.by.map(b=>b.name).join('/')}</span></li>`;});
+   s+='</ul>';}
+  const mil=h.military.filter(m=>m.status!=='active'||m.damage_delta||m.promotions_gained||m.moved_from);
+  if(mil.length){s+='<h3>Military events</h3><ul>';
+   mil.forEach(m=>{const bits=[];
+    if(m.status==='new')bits.push('<span class=warn>NEW</span>');
+    if(m.status==='founded')bits.push(`<span class=warn>founded ${m.founded_city}</span>`);
+    if(m.status==='gone')bits.push('<span class=kill>LOST</span>');
+    if(m.moved_from)bits.push('moved');
+    if(m.damage_delta)bits.push(m.damage_delta>0?`took ${m.damage_delta} dmg`:`healed ${-m.damage_delta}`);
+    if(m.promotions_gained&&m.promotions_gained.length)bits.push('promoted '+m.promotions_gained.join(','));
+    s+=`<li>${m.name} #${m.unit_id}: ${bits.join('; ')}</li>`;});
+   s+='</ul>';}
+  s+=`<h3>Map & orders</h3><div class=muted>+${h.reveals.this_turn} tiles revealed (total ${h.reveals.total}) · orders ${fmt10(h.orders.rate10)}/y, spent ≈${fmt10(h.orders.spent10_approx)}, ${fmt10(h.orders.left10)} left</div>`;
+  side.innerHTML=s;
+ }
+
+ // panes are fixed fit-to-pane; click opens the lightbox for real zooming
+ function fit(){const r=hold.getBoundingClientRect();
+  const k=Math.min(r.width/CW,r.height/CH);
+  cv.style.transform=`translate(${(r.width-CW*k)/2}px,${(r.height-CH*k)/2}px) scale(${k})`;}
+ hold.addEventListener('click',()=>openLightbox(pov,cv,fit));
+ window.addEventListener('resize',fit);
+ setTimeout(fit,0);
+
+ return {draw, sidebar, cv, hold, pov, fit};
+}
+// ── lightbox: reparent the pane's canvas, pan/zoom freely, return on close
+const lb=document.getElementById('lightbox'),lbClose=document.getElementById('lbclose'),
+ lbLabel=document.getElementById('lblabel');
+let lbState=null; // {cv, fit}
+const lbView={k:1,x:0,y:0};
+function lbApply(){if(lbState)lbState.cv.style.transform=
+ `translate(${lbView.x}px,${lbView.y}px) scale(${lbView.k})`;}
+function openLightbox(pov,cv,fit){
+ lbState={cv,fit};
+ lbLabel.textContent=D.players[pov].name+' POV — Turn '+TURNS[ti].t;
+ lb.append(cv);lb.classList.add('open');
+ const k=Math.min(window.innerWidth/CW,window.innerHeight/CH)*0.95;
+ lbView.k=k;lbView.x=(window.innerWidth-CW*k)/2;lbView.y=(window.innerHeight-CH*k)/2;
+ lbApply();}
+function closeLightbox(){if(!lbState)return;
+ const {cv,fit}=lbState;lbState=null;lb.classList.remove('open');
+ const pane=maps.find(m=>m.cv===cv);
+ if(pane)pane.hold.append(cv);fit();}
+lbClose.onclick=closeLightbox;
+lb.addEventListener('wheel',e=>{e.preventDefault();if(!lbState)return;
+ const f=e.deltaY<0?1.15:0.87,nk=Math.min(6,Math.max(.3,lbView.k*f));
+ // zoom toward cursor
+ lbView.x=e.clientX-(e.clientX-lbView.x)*(nk/lbView.k);
+ lbView.y=e.clientY-(e.clientY-lbView.y)*(nk/lbView.k);
+ lbView.k=nk;lbApply();},{passive:false});
+let lbDrag=null;
+lb.addEventListener('mousedown',e=>{if(e.target!==lb&&e.target.tagName!=='CANVAS')return;
+ lbDrag=[e.clientX,e.clientY,lbView.x,lbView.y];lb.classList.add('drag');});
+window.addEventListener('mousemove',e=>{if(!lbDrag)return;
+ lbView.x=lbDrag[2]+(e.clientX-lbDrag[0]);lbView.y=lbDrag[3]+(e.clientY-lbDrag[1]);lbApply();});
+window.addEventListener('mouseup',()=>{lbDrag=null;lb.classList.remove('drag');});
+window.addEventListener('keydown',e=>{if(e.key==='Escape')closeLightbox();});
+
+let maps=[];
+function drawAll(){maps.forEach(m=>{m.draw();m.sidebar();});
+ document.getElementById('turnlab').textContent='Turn '+TURNS[ti].t;
+ document.getElementById('slider').value=ti;
+ if(lbState){const m=maps.find(x=>x.cv===lbState.cv);
+  if(m)lbLabel.textContent=D.players[m.pov].name+' POV — Turn '+TURNS[ti].t;}}
+function setTurn(i){ti=Math.max(0,Math.min(TURNS.length-1,i));drawAll();}
+
+document.getElementById('gname').textContent=D.game
+ +(D.gameOver?` — 🏆 ${D.gameOver.winner} wins by ${D.gameOver.victory}, turn ${D.gameOver.turn}`:'');
+const slider=document.getElementById('slider');
+slider.max=TURNS.length-1;slider.value=ti;
+slider.oninput=()=>setTurn(+slider.value);
+document.getElementById('prev').onclick=()=>setTurn(ti-1);
+document.getElementById('next').onclick=()=>setTurn(ti+1);
+document.getElementById('omni').onchange=e=>{omni=e.target.checked;drawAll();};
+document.getElementById('visfog').onchange=e=>{visfog=e.target.checked;drawAll();};
+window.addEventListener('keydown',e=>{
+ if(e.key==='ArrowLeft')setTurn(ti-1);
+ if(e.key==='ArrowRight')setTurn(ti+1);});
+
+maps=[makeMap(0),makeMap(1)];
+
+// ── layout: dual POV vs single-player (map left, report right) ──────
+let view='dual';
+const seg=document.getElementById('viewseg');
+const segBtns={};
+[['dual','Dual POV'],[0,D.players[0].name],[1,D.players[1].name]].forEach(([v,label])=>{
+ const b=document.createElement('button');b.textContent=label;
+ b.onclick=()=>setView(v);seg.append(b);segBtns[v]=b;});
+function setView(v){view=v;
+ const panes=document.getElementById('panes');
+ panes.classList.toggle('single',v!=='dual');
+ maps.forEach(m=>m.hold.parentElement.classList.toggle('hidden',
+  v!=='dual'&&m.pov!==v));
+ for(const k in segBtns)segBtns[k].classList.toggle('on',String(k)===String(v));
+ setTimeout(()=>{maps.forEach(m=>m.fit());},0);}
+setView('dual');
+drawAll();
+</script></body></html>
