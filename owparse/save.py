@@ -323,9 +323,11 @@ class Snapshot:
                 was_visible={int(c.tag[2:]) for c in (t.find("WasVisibleThisTurn") if t.find("WasVisibleThisTurn") is not None else [])
                              if c.tag.startswith("ID") and c.tag[2:].isdigit()},
                 element_name=(t.findtext("ElementName") or t.findtext("CustomElementName") or "").strip() or None,
-                river_w=(t.findtext("RiverW") or "") == "1",
-                river_sw=(t.findtext("RiverSW") or "") == "1",
-                river_se=(t.findtext("RiverSE") or "") == "1",
+                # River elements hold a RotationType (0/1 = flow direction);
+                # PRESENCE means river — value 0 is a river too, not "none".
+                river_w=t.find("RiverW") is not None,
+                river_sw=t.find("RiverSW") is not None,
+                river_se=t.find("RiverSE") is not None,
                 revealed_turn=_team_map(t.find("RevealedTurn")),
             )
             for u in t.findall("Unit"):

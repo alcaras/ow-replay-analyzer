@@ -446,6 +446,18 @@ function drawFig(cv){
    const b=cen(nx,ny),mx=(ce[0]+b[0])/2,my=(ce[1]+b[1])/2,
     dx=b[0]-ce[0],dy=b[1]-ce[1],L=Math.hypot(dx,dy)||1,hl=S/Math.sqrt(3);
    ctx.beginPath();ctx.moveTo(mx-(-dy/L)*hl,my-(dx/L)*hl);ctx.lineTo(mx+(-dy/L)*hl,my+(dx/L)*hl);ctx.stroke();}}
+ // roads: half-segments from both sides; cities are road nodes
+ ctx.strokeStyle='rgba(160,120,70,.9)';ctx.lineWidth=Math.max(2,S/6);ctx.lineCap='round';
+ const cityTiles=new Set(TD.cities.map(c=>c.x));
+ const isRoad=nid=>{const e=tiles[nid];return (e&&e.r)||cityTiles.has(nid);};
+ for(const[id,e]of Object.entries(tiles)){const i=+id;
+  if(!isRoad(i)||fogged(i))continue;
+  const x=i%W,y=(i/W)|0,ce=cen(x,y);
+  for(const[nx,ny,nid]of nbIdx(x,y)){
+   if(!isRoad(nid))continue;
+   const b=cen(nx,ny);ctx.beginPath();ctx.moveTo(ce[0],ce[1]);
+   ctx.lineTo((ce[0]+b[0])/2,(ce[1]+b[1])/2);ctx.stroke();}}
+ ctx.lineCap='butt';
  for(const[id,e]of Object.entries(tiles)){const i=+id;
   if(fogged(i))continue;
   const ce=cen(i%W,(i/W)|0);
