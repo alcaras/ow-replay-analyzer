@@ -367,7 +367,8 @@ function makeMap(pov){
    const YI={YIELD_GROWTH:'🌾',YIELD_CIVICS:'⚖',YIELD_TRAINING:'⚔',
              YIELD_SCIENCE:'🧪',YIELD_CULTURE:'🎭',YIELD_MONEY:'💰'};
    const yl=c.yields?Object.entries(c.yields).map(([k,v])=>`${YI[k]||k} ${fmt10(v)}`).join(' · '):'';
-   s+=`<li><b>${c.name}</b> (pop ${c.citizens+c.specialists}) — `
+   const fam=c.family?` <span class=muted>[${c.family}${c.capital?', capital':''}]</span>`:'';
+   s+=`<li><b>${c.name}</b>${fam} (pop ${c.citizens+c.specialists}) — `
     +(p?`${p.name} (${p.years_left||'?'}y, ${fmt10(p.progress10)}/${fmt10(p.cost10)})`:'<span class=muted>idle</span>')
     +sci
     +(yl?`<div class=muted style="margin-left:12px">${yl}</div>`:'')
