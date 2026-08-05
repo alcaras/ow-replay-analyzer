@@ -97,16 +97,17 @@ class ScienceModel:
                 for p in ary.findall("Pair"):
                     other = p.findtext("zIndex")
                     for sp in p.findall("SubPair"):
-                        if sp.findtext("zSubIndex") == SCI:
-                            cross[other] = int(sp.findtext("iValue") or 0)
+                        k = sp.findtext("zSubIndex")
+                        if k:
+                            cross.setdefault(other, {})[k] = int(sp.findtext("iValue") or 0)
             out[z] = {
-                "rate": _pairs(e.find("aiYieldRate")).get(SCI, 0),
-                "modifier": _pairs(e.find("aiYieldModifier")).get(SCI, 0),
-                "rate_specialist": _pairs(e.find("aiYieldRateSpecialist")).get(SCI, 0),
-                "rate_specialist_urban": _pairs(e.find("aiYieldRateSpecialistUrban")).get(SCI, 0),
-                "rate_specialist_rural": _pairs(e.find("aiYieldRateSpecialistRural")).get(SCI, 0),
-                "rate_culture": _pairs(e.find("aiYieldRateCulture")).get(SCI, 0),
-                "rate_population": _pairs(e.find("aiYieldRatePopulation")).get(SCI, 0),
+                "rate": _pairs(e.find("aiYieldRate")),
+                "modifier": _pairs(e.find("aiYieldModifier")),
+                "rate_specialist": _pairs(e.find("aiYieldRateSpecialist")),
+                "rate_specialist_urban": _pairs(e.find("aiYieldRateSpecialistUrban")),
+                "rate_specialist_rural": _pairs(e.find("aiYieldRateSpecialistRural")),
+                "rate_culture": _pairs(e.find("aiYieldRateCulture")),
+                "rate_population": _pairs(e.find("aiYieldRatePopulation")),
                 "cross": cross,
                 "single": e.findtext("bSingle") == "1",
             }
@@ -134,7 +135,7 @@ class ScienceModel:
             out[z] = {
                 "effect_city": e.findtext("EffectCity"),
                 "effect_player": e.findtext("EffectPlayer"),  # wonders
-                "output": _pairs(e.find("aiYieldOutput")).get(SCI, 0),
+                "output": _pairs(e.find("aiYieldOutput")),
                 "class": e.findtext("ImprovementClass"),
             }
         return out
@@ -154,7 +155,7 @@ class ScienceModel:
 
     @cached_property
     def improvement_class_resource(self) -> dict[str, dict[str, int]]:
-        """improvement class → resource → science output (groves)."""
+        """improvement class → resource → {yield: output} (groves etc.)."""
         out = {}
         for z, e in self._entries("improvementClass").items():
             res = {}
@@ -163,8 +164,9 @@ class ScienceModel:
                 for p in ary.findall("Pair"):
                     r = p.findtext("zIndex")
                     for sp in p.findall("SubPair"):
-                        if sp.findtext("zSubIndex") == SCI:
-                            res[r] = int(sp.findtext("iValue") or 0)
+                        k = sp.findtext("zSubIndex")
+                        if k:
+                            res.setdefault(r, {})[k] = int(sp.findtext("iValue") or 0)
             if res:
                 out[z] = res
         return out
@@ -222,7 +224,7 @@ class ScienceModel:
         out = {}
         for z, e in self._entries("effectPlayer").items():
             out[z] = {
-                "rate": _pairs(e.find("aiYieldRate")).get(SCI, 0),
+                "rate": _pairs(e.find("aiYieldRate")),
                 "effect_city": e.findtext("EffectCity"),
                 "effect_city_extra": e.findtext("EffectCityExtra"),
                 "capital_effect_city": e.findtext("CapitalEffectCity"),
@@ -238,6 +240,23 @@ class ScienceModel:
     def sci_triangle_offset(self) -> int:
         e = self._entries("yield").get(SCI)
         return int(e.findtext("iTriangleOffset") or 0) if e is not None else 0
+
+    def _yield_neg_happiness(self, Y: str) -> int:
+        """yield.xml iNegativeHappinessModifier for any yield."""
+        e = self._entries("yield").get(Y)
+        return int(e.findtext("iNegativeHappinessModifier") or 0) if e is not None else 0
+
+    def city_yields(self, snap: Snapshot, city, yields=("YIELD_GROWTH", "YIELD_CIVICS",
+                                                        "YIELD_TRAINING", SCI)) -> dict[str, int]:
+        """{yield: rate×10} for a city — the production/economy line the
+        in-game city panel shows. Same engine port as the science model, so
+        the same accuracy caveats apply."""
+        weps = self.player_wonder_effects(snap, city.player)
+        out = {}
+        for Y in yields:
+            items, mod = self.city_science(snap, city, weps, Y)
+            out[Y] = modify(sum(v for _, v in items), mod)
+        return out
 
     @cached_property
     def sci_negative_happiness_mod(self) -> int:
@@ -267,7 +286,8 @@ class ScienceModel:
 
     # ── per-city breakdown ──────────────────────────────────────────
     def city_science(self, snap: Snapshot, city,
-                     wonder_eps: list[tuple[str, str]] | None = None) -> tuple[list[tuple[str, int]], int]:
+                     wonder_eps: list[tuple[str, str]] | None = None,
+                     Y: str = SCI) -> tuple[list[tuple[str, int]], int]:
         """→ ([(source, value10)...], modifier_pct). Flat items pre-modifier."""
         items: list[tuple[str, int]] = []
         mod_pct = 0
@@ -300,27 +320,29 @@ class ScienceModel:
             if not ec:
                 return
             n = 1 if ec["single"] else count
-            if ec["rate"]:
-                items.append((label, ec["rate"] * n))
-            if ec["modifier"]:
-                mod_pct += ec["modifier"] * n
-            if ec["rate_specialist"] and n_spec:
+            g = lambda key: ec[key].get(Y, 0)
+            if g("rate"):
+                items.append((label, g("rate") * n))
+            if g("modifier"):
+                mod_pct += g("modifier") * n
+            if g("rate_specialist") and n_spec:
                 items.append((f"{label} (×{n_spec} specialists)",
-                              ec["rate_specialist"] * n_spec * n))
-            if ec["rate_specialist_urban"] and n_urban:
+                              g("rate_specialist") * n_spec * n))
+            if g("rate_specialist_urban") and n_urban:
                 items.append((f"{label} (×{n_urban} urban spec.)",
-                              ec["rate_specialist_urban"] * n_urban * n))
-            if ec["rate_specialist_rural"] and (n_spec - n_urban):
+                              g("rate_specialist_urban") * n_urban * n))
+            if g("rate_specialist_rural") and (n_spec - n_urban):
                 items.append((f"{label} (×{n_spec - n_urban} rural spec.)",
-                              ec["rate_specialist_rural"] * (n_spec - n_urban) * n))
-            if ec["rate_culture"]:
+                              g("rate_specialist_rural") * (n_spec - n_urban) * n))
+            if g("rate_culture"):
                 items.append((f"{label} (×culture {culture_val})",
-                              ec["rate_culture"] * culture_val * n))
-            if ec["rate_population"] and population:
+                              g("rate_culture") * culture_val * n))
+            if g("rate_population") and population:
                 items.append((f"{label} (×pop {population})",
-                              ec["rate_population"] * population * n))
-            for other, v in ec["cross"].items():
-                k = cross_count(other)
+                              g("rate_population") * population * n))
+            for other, sub in ec["cross"].items():
+                v = sub.get(Y, 0)
+                k = cross_count(other) if v else 0
                 if k:
                     items.append((f"{label} (×{k} {other.replace('EFFECTCITY_PROJECT_', '').title()})",
                                   v * k * n))
@@ -335,13 +357,14 @@ class ScienceModel:
             if t.improvement and t.improvement_turns_left == 0:
                 imp = self.improvements.get(t.improvement, {})
                 imp_counts[t.improvement] = imp_counts.get(t.improvement, 0) + 1
-                if imp.get("output"):
-                    items.append((self.gd.name(t.improvement) + " (tile)", imp["output"]))
+                ov = (imp.get("output") or {}).get(Y, 0)
+                if ov:
+                    items.append((self.gd.name(t.improvement) + " (tile)", ov))
                 cls = imp.get("class")
                 res_out = self.improvement_class_resource.get(cls or "", {})
-                if t.resource and t.resource in res_out:
-                    items.append((f"{self.gd.name(t.improvement)} ({self.gd.name(t.resource)})",
-                                  res_out[t.resource]))
+                rv = res_out.get(t.resource or "", {}).get(Y, 0)
+                if rv:
+                    items.append((f"{self.gd.name(t.improvement)} ({self.gd.name(t.resource)})", rv))
             if t.specialist:
                 sp = self.specialists.get(t.specialist, {})
                 add_effect(self.gd.name(t.specialist), sp.get("effect_city"))
@@ -417,13 +440,13 @@ class ScienceModel:
                 add_effect(f"Governor trait {self.gd.name(tr)}",
                            self.traits.get(tr, {}).get("governor_effect_city"))
             wisdom = gov["ratings"].get("RATING_WISDOM", 0)
-            if wisdom and self.wisdom_governor_mod:
+            if Y == SCI and wisdom and self.wisdom_governor_mod:
                 competitive = snap.root.find("GameOptions/GAMEOPTION_COMPETITIVE_MODE") is not None
                 mod_pct += boost_rating(self.wisdom_governor_mod, wisdom, competitive)
 
         # happiness level % modifier
         if city.happiness_level < 0:
-            mod_pct += -city.happiness_level * self.sci_negative_happiness_mod
+            mod_pct += -city.happiness_level * self._yield_neg_happiness(Y)
 
         return items, mod_pct
 
@@ -474,12 +497,12 @@ class ScienceModel:
                       self.globals_int.get("COURTIER_YIELD_MODIFIER", -67))
 
         if competitive:
-            stip = self.effect_player.get("EFFECTPLAYER_COMPETITIVE_MODE", {}).get("rate", 0)
+            stip = self.effect_player.get("EFFECTPLAYER_COMPETITIVE_MODE", {}).get("rate", {}).get(SCI, 0)
             if stip:
                 rows.append(("Competitive stipend", stip))
 
         for wname, ep in wonder_eps:
-            v = self.effect_player.get(ep, {}).get("rate", 0)
+            v = self.effect_player.get(ep, {}).get("rate", {}).get(SCI, 0)
             if v:
                 rows.append((f"Wonder {wname}", v))
 
@@ -508,7 +531,7 @@ class ScienceModel:
         if pid < len(snap.difficulties):
             dep = self.difficulties.get(snap.difficulties[pid])
             if dep:
-                v = self.effect_player.get(dep, {}).get("rate", 0)
+                v = self.effect_player.get(dep, {}).get("rate", {}).get(SCI, 0)
                 if v:
                     lbl = snap.difficulties[pid].replace("DIFFICULTY_", "").title()
                     rows.append((f"Difficulty ({lbl})", v))
@@ -516,7 +539,7 @@ class ScienceModel:
         for lawclass, law in roles["laws"].items():
             ep = self.laws.get(law)
             if ep:
-                v = self.effect_player.get(ep, {}).get("rate", 0)
+                v = self.effect_player.get(ep, {}).get("rate", {}).get(SCI, 0)
                 if v:
                     rows.append((f"Law {self.gd.name(law)}", v))
 
@@ -524,7 +547,7 @@ class ScienceModel:
             for tr in chars[roles["leader"]]["traits"]:
                 lep = self.traits.get(tr, {}).get("leader_effect_player")
                 if lep:
-                    v = self.effect_player.get(lep, {}).get("rate", 0)
+                    v = self.effect_player.get(lep, {}).get("rate", {}).get(SCI, 0)
                     if v:
                         rows.append((f"Leader trait {self.gd.name(tr)}", v))
 

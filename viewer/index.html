@@ -92,6 +92,22 @@ function nbIdx(x,y){const o=[];for(let q=0;q<6;q++){
  if(nx>=0&&ny>=0&&nx<W&&ny<H)o.push([nx,ny,ny*W+nx]);}return o;}
 function lum(c){return .299*c[0]+.587*c[1]+.114*c[2];}
 function fmt10(v){return v==null?'?':(v/10).toFixed(1).replace(/\.0$/,'');}
+// Old World-style health pips: HealthPerTick=2 (unit-widget.xml), each
+// tick fills bottom-up so odd HP shows a half tick; unfilled #353535;
+// health colors from color.xml (MAX/HIGH/LOW).
+function drawHP(ctx,cx,cy,S,hp,mhp){
+ const ticks=Math.ceil(mhp/2),w=S*1.05,h=S*0.3,tw=w/ticks;
+ const frac=hp/mhp,col=frac>2/3?'#00cf00':frac>1/3?'#f7ff54':'#ffaa54';
+ ctx.fillStyle='#000';ctx.fillRect(cx-w/2-1,cy-1,w+2,h+2);
+ ctx.fillStyle='#353535';ctx.fillRect(cx-w/2,cy,w,h);
+ for(let i=0;i<ticks;i++){
+  const tickHP=Math.max(0,Math.min(2,hp-i*2));
+  if(!tickHP)continue;
+  const x=cx-w/2+i*tw;
+  ctx.fillStyle=col;
+  if(tickHP>=2)ctx.fillRect(x+0.5,cy+0.5,tw-1,h-1);
+  else ctx.fillRect(x+0.5,cy+h/2,tw-1,h/2-0.5);}
+}
 const icons={};
 function icon(n){if(!(n in icons)){const im=new Image();im.onload=()=>drawAll();
  im.onerror=()=>{icons[n]=null};
@@ -255,10 +271,7 @@ function makeMap(pov){
    const im=icon(u.t);
    if(im&&im.complete&&im.naturalWidth)
     ctx.drawImage(im,ce[0]-S*.4,ce[1]-S*.16,S*.8,S*.8);
-   if(u.hp<u.mhp){const w=S*.9,frac=u.hp/u.mhp;
-    ctx.fillStyle='#333';ctx.fillRect(ce[0]-w/2,ce[1]+S*.84,w,2.8);
-    ctx.fillStyle=frac>.5?'#7fb069':frac>.25?'#e8b45a':'#e06c5b';
-    ctx.fillRect(ce[0]-w/2,ce[1]+S*.84,w*frac,2.8);}}
+   if(u.hp<u.mhp)drawHP(ctx,ce[0],ce[1]+S*.8,S,u.hp,u.mhp);}
   // cities: crest + label (enemy production hidden under POV fog)
   for(const c of TD.cities){
    if(fogged(c.x,T))continue;
@@ -351,10 +364,13 @@ function makeMap(pov){
    let sci='';
    if(cs.total10!=null){sci=` · 🧪${fmt10(cs.total10)}`;
     if(cs.delta10)sci+=` <span class=${cs.delta10>0?'warn':'kill'}>(${cs.delta10>0?'+':''}${fmt10(cs.delta10)})</span>`;}
+   const YI={YIELD_GROWTH:'🌾',YIELD_CIVICS:'⚖',YIELD_TRAINING:'⚔',
+             YIELD_SCIENCE:'🧪',YIELD_CULTURE:'🎭',YIELD_MONEY:'💰'};
+   const yl=c.yields?Object.entries(c.yields).map(([k,v])=>`${YI[k]||k} ${fmt10(v)}`).join(' · '):'';
    s+=`<li><b>${c.name}</b> (pop ${c.citizens+c.specialists}) — `
     +(p?`${p.name} (${p.years_left||'?'}y, ${fmt10(p.progress10)}/${fmt10(p.cost10)})`:'<span class=muted>idle</span>')
-    +(c.growth_delta10?` <span class=muted>${c.growth_delta10>0?'+':''}${fmt10(c.growth_delta10)}g/y</span>`:'')
     +sci
+    +(yl?`<div class=muted style="margin-left:12px">${yl}</div>`:'')
     +(cs.changes&&cs.changes.length?`<div class=muted style="margin-left:12px">${cs.changes.join('; ')}</div>`:'')
     +'</li>';});
   s+='</ul>';
@@ -372,7 +388,12 @@ function makeMap(pov){
    mil.forEach(m=>{const bits=[];
     if(m.status==='new')bits.push('<span class=warn>NEW</span>');
     if(m.status==='founded')bits.push(`<span class=warn>founded ${m.founded_city}</span>`);
-    if(m.status==='gone')bits.push('<span class=kill>LOST</span>');
+    if(m.status==='gone'){let t='<span class=kill>LOST</span>';
+     if(m.died_xy)t+=` at (${m.died_xy})`;
+     if(m.killed_by)t+=` <span class=muted>— killed by ${m.killed_by}`
+      +(m.killed_by_units&&m.killed_by_units.length?` (${m.killed_by_units.map(u=>u.name).join('/')})`:'')
+      +(m.kill_confidence!=='cooldown'?' [inferred]':'')+'</span>';
+     bits.push(t);}
     if(m.moved_from)bits.push('moved');
     if(m.damage_delta)bits.push(m.damage_delta>0?`took ${m.damage_delta} dmg`:`healed ${-m.damage_delta}`);
     if(m.promotions_gained&&m.promotions_gained.length)bits.push('promoted '+m.promotions_gained.join(','));

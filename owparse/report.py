@@ -305,6 +305,28 @@ class Reporter:
             # itemized diff explaining the change
             sci = self._city_science_delta(cur, prev, c, pid)
             growth = c.yield_progress.get("YIELD_GROWTH", 0)
+            # Per-city yield outputs. Growth and the active production yield
+            # are OBSERVED (progress deltas = ground truth); culture likewise.
+            # Science is modeled (validated). Civics/training have no per-city
+            # accumulator in the save, so they only appear when the city is
+            # currently producing with that yield.
+            yields = {}
+            if pc is not None:
+                g = growth - pc.yield_progress.get("YIELD_GROWTH", 0)
+                if g > 0:
+                    yields["YIELD_GROWTH"] = g
+                cd = (c.yield_progress.get("YIELD_CULTURE", 0)
+                      - pc.yield_progress.get("YIELD_CULTURE", 0))
+                if cd > 0:
+                    yields["YIELD_CULTURE"] = cd
+            if head is not None and bs is not None and bs.rate10:
+                py = {"BUILD_UNIT": self.gd.units, "BUILD_PROJECT": self.gd.projects,
+                      "BUILD_SPECIALIST": self.gd.specialists}.get(head.build, {})
+                pyield = (py.get(head.ztype) or {}).get("prod_yield")
+                if pyield:
+                    yields[pyield] = max(yields.get(pyield, 0), bs.rate10)
+            if sci.get("total10") is not None:
+                yields["YIELD_SCIENCE"] = sci["total10"]
             growth_delta = growth - (pc.yield_progress.get("YIELD_GROWTH", 0) if pc else 0) if pc else None
             out.append({
                 "id": c.id, "name": self.gd.name(c.name_token),
@@ -327,6 +349,7 @@ class Reporter:
                 "constructing": constructing,
                 "projects": projects,
                 "science": sci,
+                "yields": yields,
             })
         return out
 
@@ -442,6 +465,28 @@ class Reporter:
                 "status": d.status, "xy": cur.xy(u.tile_id) if d.status != "gone" else None,
                 "level": u.level, "hp": None,
             }
+            if d.status == "gone":
+                # last known position = where it died (units can't move after
+                # their owner's half in this window; see method notes)
+                e["died_xy"] = cur.xy(u.tile_id)
+                e["died_tile"] = u.tile_id
+                e["last_hp"] = 20 - u.damage if u.damage else None
+                if prev is not None:
+                    # attribute the kill: did an opponent attack that tile
+                    # during this window?
+                    for opp in cur.players:
+                        if opp == pid:
+                            continue
+                        for ev in combat_events(prev, cur, opp):
+                            if ev.tile_id == u.tile_id:
+                                e["killed_by"] = cur.players[opp].name
+                                e["killed_by_units"] = [
+                                    {"unit_id": a.id, "name": self.gd.name(a.type)}
+                                    for a in ev.attacker_units[:3]]
+                                e["kill_confidence"] = ev.confidence
+                                break
+                        if "killed_by" in e:
+                            break
             if d.status == "active":
                 if d.upgraded_from:
                     e["upgraded_from"] = self.gd.name(d.upgraded_from)
@@ -625,6 +670,12 @@ def render_markdown(rep: dict) -> str:
             L.append(f"- **{c['name']}** (pop {pop}{seat}): {prod}{growth}{sci_s}")
             if csci.get("changes"):
                 L.append(f"    - sci change: {'; '.join(csci['changes'])}")
+            if c.get("yields"):
+                ICON = {"YIELD_GROWTH": "🌾 growth", "YIELD_CIVICS": "⚖ civics",
+                        "YIELD_TRAINING": "⚔ training", "YIELD_SCIENCE": "🧪 science",
+                        "YIELD_CULTURE": "🎭 culture", "YIELD_MONEY": "💰 money"}
+                L.append("    - yields: " + ", ".join(
+                    f"{ICON.get(k, k)} {fmt10(v)}/y" for k, v in c["yields"].items()))
             if c["also_queued"]:
                 L.append(f"    - then: {', '.join(q['name'] for q in c['also_queued'])}")
             if c.get("improvements"):
@@ -661,7 +712,15 @@ def render_markdown(rep: dict) -> str:
                 elif m["status"] == "founded":
                     bits.append(f"founded **{m['founded_city']}** @{m['xy']}")
                 elif m["status"] == "gone":
-                    bits.append("LOST/gone")
+                    loc = f" at {m['died_xy']}" if m.get("died_xy") else ""
+                    by = ""
+                    if m.get("killed_by"):
+                        who = "/".join(u["name"] for u in m.get("killed_by_units", [])) or "?"
+                        by = f" — killed by {m['killed_by']} ({who})"
+                        if m.get("kill_confidence") != "cooldown":
+                            by += " [inferred]"
+                    hp = f", was at {m['last_hp']}hp" if m.get("last_hp") else ""
+                    bits.append(f"LOST{loc}{by}{hp}")
                 if m.get("moved_from"):
                     bits.append(f"moved {m['moved_from']}→{m['xy']}")
                 elif m.get("held_position"):

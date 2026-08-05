@@ -480,10 +480,19 @@ function drawFig(cv){
   ctx.strokeStyle='#0b0c0f';ctx.lineWidth=1.4;ctx.stroke();
   const im=icon(u.t);
   if(im&&im.complete&&im.naturalWidth)ctx.drawImage(im,ce[0]-S*.4,ce[1]-S*.16,S*.8,S*.8);
-  if(u.hp<u.mhp){const w=S*.9,fr2=u.hp/u.mhp;
-   ctx.fillStyle='#333';ctx.fillRect(ce[0]-w/2,ce[1]+S*.84,w,3);
-   ctx.fillStyle=fr2>.5?'#7fb069':fr2>.25?'#e8b45a':'#e06c5b';
-   ctx.fillRect(ce[0]-w/2,ce[1]+S*.84,w*fr2,3);}}
+  if(u.hp<u.mhp){ // OW-style pips: 2 HP per tick, odd HP = half tick
+   const mhp=u.mhp,hp=u.hp,ticks=Math.ceil(mhp/2),w=S*1.05,h=S*0.3,tw=w/ticks;
+   const cy2=ce[1]+S*.8,frac=hp/mhp,
+    col=frac>2/3?'#00cf00':frac>1/3?'#f7ff54':'#ffaa54';
+   ctx.fillStyle='#000';ctx.fillRect(ce[0]-w/2-1,cy2-1,w+2,h+2);
+   ctx.fillStyle='#353535';ctx.fillRect(ce[0]-w/2,cy2,w,h);
+   for(let q=0;q<ticks;q++){
+    const tickHP=Math.max(0,Math.min(2,hp-q*2));
+    if(!tickHP)continue;
+    const x=ce[0]-w/2+q*tw;
+    ctx.fillStyle=col;
+    if(tickHP>=2)ctx.fillRect(x+0.5,cy2+0.5,tw-1,h-1);
+    else ctx.fillRect(x+0.5,cy2+h/2,tw-1,h/2-0.5);}}}
  for(const c of TD.cities){
   if(fogged(c.x))continue;
   const ce=cen(c.x%W,(c.x/W)|0),pc=PCOL[c.p]||PCOL['-1'];
