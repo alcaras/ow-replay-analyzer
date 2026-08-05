@@ -17,6 +17,7 @@ C0, C1 = "#3987e5", "#c94b46"
 
 
 def main():
+    R.setup(ARCHIVE, C0, C1)
     M, idle = R.collect()
     F = json.load(open("analysis/hazard-factsheet.json"))
     ch = {k: R.chart(f"ch-{k}", t, M[k][0], M[k][1], u) for k, t, u in [

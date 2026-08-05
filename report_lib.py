@@ -118,6 +118,20 @@ def fig(fid, turn, pov, cx, cy, span, caption, w=560, h=430):
 
 
 
+def setup(archive, c0=None, c1=None):
+    """Call FIRST in a narrative: binds the archive, chart colours and the
+    real player names. chart() reads these at call time, so setting them
+    later (e.g. only in render()) silently mislabels every chart."""
+    global ARCHIVE, C0, C1, NAME
+    ARCHIVE = archive
+    if c0: C0 = c0
+    if c1: C1 = c1
+    s = Series(archive)
+    last = s.snapshot(s.turns[-1])
+    NAME = {pid: p.name for pid, p in last.players.items()}
+    return NAME
+
+
 def render(archive, out, body_html, c0=None, c1=None, title="Old World duel"):
     """Assemble a report: caller supplies the narrative body; this wires the
     charts/figures/template and inlines viewer data + icons."""
