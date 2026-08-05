@@ -31,8 +31,12 @@ OUT = Path("analysis/alcaras-v-lich-report.html")
 # (Persia red / Babylonia green; CVD ΔE 7.9 = floor band, legal because
 # every chart carries direct labels + hover tooltips). Map figures use the
 # authentic in-game nation colors from the embedded data.
-C0, C1 = "#c94b46", "#69a832"
-NAME = {0: "alcaras", 1: "Lich"}
+from owparse.series import Series as _S
+_gd = GameData()
+_last = _S(ARCHIVE).snapshot(_S(ARCHIVE).turns[-1])
+NAME = {pid: pl.name for pid, pl in _last.players.items()}
+C0 = _gd.chart_color(_last.players[0].nation)
+C1 = _gd.chart_color(_last.players[1].nation)
 
 # ── metrics ──────────────────────────────────────────────────────────
 

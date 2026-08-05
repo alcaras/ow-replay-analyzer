@@ -15,7 +15,7 @@ C0, C1 = "#c94b46", "#69a832"
 
 
 def main():
-    R.setup(ARCHIVE, C0, C1)
+    R.setup(ARCHIVE)   # chart colours come from each nation
     M, idle = R.collect()
     F = json.load(open("analysis/wetlander-factsheet.json"))
     ch = {k: R.chart(f"ch-{k}", t, M[k][0], M[k][1], u) for k, t, u in [
@@ -138,7 +138,7 @@ Figures are rendered by the replay engine from the same saves. Full numbers:
 <code>analysis/wetlander-factsheet.json</code>.</p>
 </section>
 """
-    R.render(ARCHIVE, OUT, body, C0, C1,
+    R.render(ARCHIVE, OUT, body, R.C0, R.C1,
              title="alcaras v Wetlander — winning without the science lead")
 
 

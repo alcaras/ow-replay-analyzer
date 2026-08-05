@@ -17,7 +17,7 @@ C0, C1 = "#3987e5", "#c94b46"
 
 
 def main():
-    R.setup(ARCHIVE, C0, C1)
+    R.setup(ARCHIVE)   # chart colours come from each nation
     M, idle = R.collect()
     F = json.load(open("analysis/hazard-factsheet.json"))
     ch = {k: R.chart(f"ch-{k}", t, M[k][0], M[k][1], u) for k, t, u in [
@@ -146,7 +146,7 @@ the replay engine from the same saves. Full numbers:
 <code>analysis/hazard-factsheet.json</code>.</p>
 </section>
 """
-    R.render(ARCHIVE, OUT, body, C0, C1,
+    R.render(ARCHIVE, OUT, body, R.C0, R.C1,
              title="alcaras v HazardBringsAxe — an 83-turn win")
 
 

@@ -258,6 +258,58 @@ class GameData:
         col = {z: e.findtext("zHexValue") for z, e in self._merged("color").items()}
         return col.get(p.findtext("BorderColor") or p.findtext("CrestColor") or "")
 
+    # ── chart-safe nation colours ───────────────────────────────────
+    @staticmethod
+    def _srgb_to_oklab(r, g, b):
+        def lin(c):
+            c /= 255
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        r, g, b = lin(r), lin(g), lin(b)
+        l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3)
+        m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3)
+        s_ = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)
+        return (0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s_,
+                1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s_,
+                0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s_)
+
+    @staticmethod
+    def _oklab_to_srgb(L, a, b):
+        l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3
+        m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3
+        s_ = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3
+        r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s_
+        g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s_
+        bb = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s_
+        def out(c):
+            c = max(0.0, min(1.0, c))
+            c = 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+            return max(0, min(255, round(c * 255)))
+        return out(r), out(g), out(bb)
+
+    def chart_color(self, nation_ztype: str, lo=0.50, hi=0.65, cmin=0.11) -> str:
+        """The nation's own hue, snapped into the dark-surface lightness
+        band and chroma floor the dataviz checks require. Keeps identity
+        (Hittite reads cyan, Tamil teal) while staying legible on #0b0c0f."""
+        import math
+        hexv = self.nation_color(nation_ztype) or "#888888"
+        h = hexv.lstrip("#")[:6]
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+        L, A, B = self._srgb_to_oklab(r, g, b)
+        C = math.hypot(A, B)
+        H = math.atan2(B, A)
+        if C < 0.045:
+            # The nation's identity IS neutral (Carthage's off-white, Kush's
+            # cream). Forcing it into the chroma floor invents a hue that
+            # collides with a real one (Carthage→gold vs Yuezhi's gold, ΔE 3).
+            # Keep it achromatic and bright: on a dark surface a near-white
+            # line is legible and maximally separated from any hue.
+            L = max(0.86, L)
+            C = min(C, 0.02)
+        else:
+            L = max(lo, min(hi, L))
+            C = max(cmin, min(C, 0.16))
+        return "#%02x%02x%02x" % self._oklab_to_srgb(L, C * math.cos(H), C * math.sin(H))
+
     def family_class_name(self, family_ztype: str) -> str:
         """FAMILY_MIHRANID → 'Artisans' (its class display name)."""
         f = self.families.get(family_ztype)

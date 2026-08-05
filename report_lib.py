@@ -124,11 +124,15 @@ def setup(archive, c0=None, c1=None):
     later (e.g. only in render()) silently mislabels every chart."""
     global ARCHIVE, C0, C1, NAME
     ARCHIVE = archive
-    if c0: C0 = c0
-    if c1: C1 = c1
     s = Series(archive)
     last = s.snapshot(s.turns[-1])
     NAME = {pid: p.name for pid, p in last.players.items()}
+    # Chart colours default to each player's OWN nation colour, snapped
+    # into the dark-surface band (hue preserved; neutral nations stay
+    # neutral). Explicit c0/c1 still win.
+    gd = GameData()
+    C0 = c0 or gd.chart_color(last.players[0].nation)
+    C1 = c1 or gd.chart_color(last.players[1].nation)
     return NAME
 
 
