@@ -71,7 +71,8 @@ def main():
         rev0[i] = t.revealed_turn.get(0, -1)
         rev1[i] = t.revealed_turn.get(1, -1)
 
-    players = {p.id: {"name": p.name, "nation": gd.name(p.nation)}
+    players = {p.id: {"name": p.name, "nation": gd.name(p.nation),
+                      "color": gd.nation_color(p.nation) or ("#e8b45a" if p.id == 0 else "#6ea0d2")}
                for p in last.players.values()}
 
     # ── landmarks: tiles sharing an ElementName form one landmark; a team

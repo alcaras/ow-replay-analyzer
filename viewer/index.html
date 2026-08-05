@@ -61,6 +61,7 @@
  <span class=segbtn id=viewseg></span>
  <label class=ck><input type=checkbox id=omni> omniscient</label>
  <label class=ck><input type=checkbox id=visfog checked> vision fog</label>
+ <label class=ck><input type=checkbox id=hccol> high-contrast colors</label>
  <span class=muted>click a map to zoom · ←/→ keys · bright = currently visible, dim = explored, dark = unexplored (vision is geometric approx.)</span>
 </div>
 <div id=panes></div>
@@ -69,7 +70,16 @@
 <script src="data.js"></script>
 <script>
 const D=DATA, W=D.w, H=D.h, TURNS=D.turns;
-const PCOL={0:[232,180,90],1:[110,160,210],'-1':[150,60,60]};
+function hex2rgb(h){h=(h||'#888888').replace('#','');
+ return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+const HC={0:'#3a86e0',1:'#d9433b'};   // high-contrast blue/red
+let PCOL={};
+function setColors(mode){
+ PCOL={'-1':[140,132,120]};          // tribes/barbs: neutral gray-brown
+ for(const pid in D.players)
+  PCOL[pid]=hex2rgb(mode==='hc'?HC[pid]:D.players[pid].color);
+}
+setColors('nation');
 const TERR={WATER:[38,71,110],TEMPERATE:[104,138,74],LUSH:[74,110,56],
  ARID:[170,148,95],SAND:[206,184,120],MARSH:[96,110,80],
  TUNDRA:[200,205,210],URBAN:[150,128,116]};
@@ -100,7 +110,7 @@ function hexd(a,b){const cube=i=>{const col=i%W,row=(i/W)|0,
 function makeMap(pov){
  const pane=document.createElement('div');pane.className='pane';
  const pl=D.players[pov];
- pane.innerHTML=`<h2><span class=p${pov}>${pl.name}</span> <span class=pov>(${pl.nation}) — their fog of war</span></h2>
+ pane.innerHTML=`<h2><span style="color:${pl.color}">${pl.name}</span> <span class=pov>(${pl.nation}) — their fog of war</span></h2>
   <div class=maphold><canvas></canvas></div><div class=side></div>`;
  document.getElementById('panes').append(pane);
  const hold=pane.querySelector('.maphold'), cv=pane.querySelector('canvas'),
@@ -157,14 +167,17 @@ function makeMap(pov){
      ctx.fillStyle=gc;ctx.beginPath();ctx.moveTo(X,yb-th);
      ctx.lineTo(X-tw,yb);ctx.lineTo(X+tw,yb);ctx.closePath();ctx.fill();}}
   }
-  // rivers (edge W/SW/SE bits), skip fogged
+  // rivers (edge W/SW/SE bits). The flag lives on ONE of the two tiles
+  // sharing the edge — draw it if EITHER side is unfogged, else a visible
+  // tile loses its river whenever the flag-owner is fogged.
   ctx.strokeStyle='#4696eb';ctx.lineWidth=Math.max(2,S/4);
   const RB={1:5,2:4,4:3};
-  for(let i=0;i<W*H;i++){if(!D.riv[i]||fogged(i,TD.t))continue;
+  for(let i=0;i<W*H;i++){if(!D.riv[i])continue;
    const x=i%W,y=(i/W)|0,ce=cen(x,y);
    for(const bit in RB){if(!(D.riv[i]&bit))continue;
     const di=RB[bit],ox=(y%2===0?DXe:DXo)[di],nx=x+ox,ny=y+DY[di];
     if(nx<0||ny<0||nx>=W||ny>=H)continue;
+    if(fogged(i,TD.t)&&fogged(ny*W+nx,TD.t))continue;
     const nc=cen(nx,ny),mx=(ce[0]+nc[0])/2,my=(ce[1]+nc[1])/2,
      dx=nc[0]-ce[0],dy=nc[1]-ce[1],L=Math.hypot(dx,dy)||1,hh=S/Math.sqrt(3)*.96;
     ctx.beginPath();ctx.moveTo(mx-(-dy/L)*hh,my-(dx/L)*hh);
@@ -423,6 +436,7 @@ document.getElementById('prev').onclick=()=>setTurn(ti-1);
 document.getElementById('next').onclick=()=>setTurn(ti+1);
 document.getElementById('omni').onchange=e=>{omni=e.target.checked;drawAll();};
 document.getElementById('visfog').onchange=e=>{visfog=e.target.checked;drawAll();};
+document.getElementById('hccol').onchange=e=>{setColors(e.target.checked?'hc':'nation');drawAll();};
 window.addEventListener('keydown',e=>{
  if(e.key==='ArrowLeft')setTurn(ti-1);
  if(e.key==='ArrowRight')setTurn(ti+1);});

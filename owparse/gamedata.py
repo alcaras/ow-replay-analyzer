@@ -243,6 +243,21 @@ class GameData:
                 out[o] = story
         return out
 
+    def nation_color(self, nation_ztype: str) -> str | None:
+        """Nation's player color hex (border/crest color chain:
+        nation → TeamColor → TeamPlayerColor → color.xml)."""
+        nat = self._merged("nation").get(nation_ztype)
+        if nat is None:
+            return None
+        tc = self._merged("teamColor").get(nat.findtext("TeamColor") or "")
+        if tc is None:
+            return None
+        p = self._merged("playerColor").get(tc.findtext("TeamPlayerColor") or "")
+        if p is None:
+            return None
+        col = {z: e.findtext("zHexValue") for z, e in self._merged("color").items()}
+        return col.get(p.findtext("BorderColor") or p.findtext("CrestColor") or "")
+
     def family_class_name(self, family_ztype: str) -> str:
         """FAMILY_MIHRANID → 'Artisans' (its class display name)."""
         f = self.families.get(family_ztype)

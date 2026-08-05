@@ -27,7 +27,11 @@ ARCHIVE = (sys.argv[1] if len(sys.argv) > 1 else
            sys.exit("usage: build_report.py <archive dir>  (this script is the "
                     "alcaras-v-lich instance; copy it per game, see docs/game-report-method.md)"))
 OUT = Path("analysis/alcaras-v-lich-report.html")
-C0, C1 = "#b8862f", "#3987e5"          # validated dark-mode palette
+# Chart palette: nation hues snapped to dark-mode-validated steps
+# (Persia red / Babylonia green; CVD ΔE 7.9 = floor band, legal because
+# every chart carries direct labels + hover tooltips). Map figures use the
+# authentic in-game nation colors from the embedded data.
+C0, C1 = "#c94b46", "#69a832"
 NAME = {0: "alcaras", 1: "Lich"}
 
 # ── metrics ──────────────────────────────────────────────────────────
@@ -362,7 +366,10 @@ document.querySelectorAll('svg[data-c]').forEach(svg=>{
 
 // ── map figures: trimmed replay renderer ─────────────────────────────
 const D=DATA,W=D.w,H=D.h;
-const PCOL={0:[232,180,90],1:[110,160,210],'-1':[150,60,60]};
+function hex2rgb(h){h=(h||'#888888').replace('#','');
+ return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+const PCOL={'-1':[140,132,120]};
+for(const pid in D.players)PCOL[pid]=hex2rgb(D.players[pid].color);
 const TERR={WATER:[38,71,110],TEMPERATE:[104,138,74],LUSH:[74,110,56],ARID:[170,148,95],
  SAND:[206,184,120],MARSH:[96,110,80],TUNDRA:[200,205,210],URBAN:[150,128,116]};
 const S=26,HW=Math.sqrt(3)*S,VS=1.5*S;
@@ -371,10 +378,17 @@ const DXe=[0,1,1,1,0,-1],DXo=[-1,0,1,0,-1,-1],DY=[1,1,0,-1,-1,0];
 function nbIdx(x,y){const o=[];for(let q=0;q<6;q++){const nx=x+(y%2===0?DXe:DXo)[q],ny=y+DY[q];
  if(nx>=0&&ny>=0&&nx<W&&ny<H)o.push([nx,ny,ny*W+nx]);}return o;}
 function lum(c){return .299*c[0]+.587*c[1]+.114*c[2];}
-const icons={};let pending=0;
-function icon(n,redraw){if(!(n in icons)){const im=new Image();pending++;
- im.onload=()=>{if(--pending<=0)drawFigs();};im.onerror=()=>{icons[n]=null;--pending;};
- im.src=ICON_DATA[n]||'';icons[n]=im;}return icons[n];}
+// Preload EVERY embedded icon up front; draw once all have decoded (and
+// once immediately so text/terrain shows even before). A lazy-load scheme
+// here left figures with colored dots when late/failed decodes never
+// triggered the redraw.
+const icons={};
+function icon(n){return icons[n]||null;}
+const iconsReady=Promise.all(Object.entries(ICON_DATA).map(([n,src])=>
+ new Promise(res=>{const im=new Image();
+  im.onload=()=>{icons[n]=im;res();};
+  im.onerror=()=>{icons[n]=null;res();};
+  im.src=src;})));
 function tidx(turn){return D.turns.findIndex(td=>td.t==turn);}
 function drawFig(cv){
  const T=+cv.dataset.t,pov=cv.dataset.pov,cx=+cv.dataset.cx,cy=+cv.dataset.cy,span=+cv.dataset.span;
@@ -413,11 +427,12 @@ function drawFig(cv){
     ctx.lineTo(X-tw,yb);ctx.lineTo(X+tw,yb);ctx.closePath();ctx.fill();}}}
  ctx.strokeStyle='#4696eb';ctx.lineWidth=Math.max(2,S/4);
  const RB={1:5,2:4,4:3};
- for(let i=0;i<W*H;i++){if(!D.riv[i]||fogged(i))continue;
+ for(let i=0;i<W*H;i++){if(!D.riv[i])continue;
   const x=i%W,y=(i/W)|0,ce=cen(x,y);
   for(const bit in RB){if(!(D.riv[i]&bit))continue;
    const di=RB[bit],ox=(y%2===0?DXe:DXo)[di],nx=x+ox,ny=y+DY[di];
    if(nx<0||ny<0||nx>=W||ny>=H)continue;
+   if(fogged(i)&&fogged(ny*W+nx))continue;
    const nc=cen(nx,ny),mx=(ce[0]+nc[0])/2,my=(ce[1]+nc[1])/2,
     dx=nc[0]-ce[0],dy=nc[1]-ce[1],L=Math.hypot(dx,dy)||1,hl=S/Math.sqrt(3)*.96;
    ctx.beginPath();ctx.moveTo(mx-(-dy/L)*hl,my-(dx/L)*hl);ctx.lineTo(mx+(-dy/L)*hl,my+(dx/L)*hl);ctx.stroke();}}
@@ -472,6 +487,8 @@ function drawFig(cv){
 }
 function drawFigs(){document.querySelectorAll('canvas[data-t]').forEach(drawFig);}
 drawFigs();
+iconsReady.then(drawFigs);
+window.addEventListener('load',drawFigs);
 </script></body></html>"""
 
 
