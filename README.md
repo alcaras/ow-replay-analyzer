@@ -11,6 +11,9 @@ and its alternatives, attacks and damage, laws, events and the options
 chosen, per-source science income, exact per-team fog of war — and renders
 it as an interactive dual-POV replay and a shareable analysis report.
 
+**Replay library (companion site): https://alcaras.github.io/owreplays/** —
+published games, each with its interactive replay and analysis report.
+
 ## Examples (from a real 63-turn tournament duel)
 
 - [`examples/alcaras-v-lich-replay.html`](examples/alcaras-v-lich-replay.html)
